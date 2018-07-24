@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<head>
+  <!-- Plotly.js -->
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/MathJax.js?config=TeX-MML-AM_CHTML' async></script>
+  <script src="solar.js"></script>
+  <title>Average Solar Zenith Angles</title>
+
+  <style>
+    input[type=text] {
+      padding:5px;
+      border:2px solid #ccc;
+      -webkit-border-radius: 5px;
+      border-radius: 5px;
+      font-family: Arial,Helvetica,sans-serif;
+    }
+
+    input[type=text]:focus {
+        border-color:#333;
+    }
+
+    input[type=date] {
+      padding:5px;
+      border:2px solid #ccc;
+      -webkit-border-radius: 5px;
+      border-radius: 5px;
+      font-family: Arial,Helvetica,sans-serif;
+    }
+
+    input[type=date]:focus {
+        border-color:#333;
+    }
+
+    input[type=submit] {
+        padding:5px 15px;
+        background:#ccc;
+        border:0 none;
+        cursor:pointer;
+        -webkit-border-radius: 5px;
+        border-radius: 5px;
+    }
+  </style>
+</head>
+
+<body>
+
+
+<div id="input"
+  style="float: left; width: 30%; font-family: Arial,Helvetica,sans-serif;">
+  <h2 style="padding: 15pt 15pt">
+    Average Solar Zenith Angles
+  </h2>
+  <p style="padding: 7.5pt 15pt">
+    This calculator computes insolation-weighted and daytime average solar
+    zenith angles over diurnal and annual cycles. Both types of averages are
+    used in climate studies with time-averaged insolation, but choosing the
+    insolation-weighted average reduces time-mean albedo biases
+    (see <a href="http://web.mit.edu/~twcronin/www/document/Cronin2014.pdf"
+    target="_blank">
+    this paper</a> for details).
+  </p>
+  <p style="padding: 7.5pt 15pt">
+    The cosine of the solar zenith angle <i>&#956</i> is calculated
+    from a latitude <i>&#966</i>, hour angle <i>h</i>, and solar
+    declination <i>&#948</i> as
+    $$\mu = \sin(\phi) \sin (\delta) + \cos(\phi) \cos(\delta) \cos(h),$$
+    and declination angles are computed from formulae in
+    <i>Astronomical Algorithms</i> by Jean Meeus. The insolation-weighted average
+    of <i>&#956</i> is
+    $$\mu^*_I = \frac{\left \langle \mu^2 \right \rangle}
+    {\left \langle \mu \right \rangle},$$
+    and the daytime average is a simple average over times when the cosine
+    of the zenith angle is positive.
+  </p>
+  <form onsubmit="calculate_zenith_angles();return false"
+    style="padding: 7.5pt 15pt">
+    Start date:<br>
+    <input id="date_input" type="date"><br><br>
+    Latitude:<br>
+    <input id="lat_input" type="text"><br><br>
+    <input type="submit" value="Calculate">
+  </form>
+</div>
+<div id="plots" style="float: left; width: 70%;">
+  <div id="day_chart"></div>
+  <div id="year_chart"></div>
+</div>
+  <script>
+    function calculate_zenith_angles() {
+      // Replace with input eventually
+      var year, month, day, lat;
+
+      // Parse latitude
+      lat = Number(document.getElementById("lat_input").value);
+      if (isNaN(lat)) {
+        window.alert("Invalid latitude");
+        return;
+      }
+      if (lat < -90 || lat > 90) {
+        window.alert("Latitude must be between -90 and 90 degrees")
+        return;
+      }
+
+      // Parse date
+      var date_string = document.getElementById("date_input").value;
+      year = parseInt(date_string.slice(0,4));
+      month = parseInt(date_string.slice(5,7));
+      day = parseInt(date_string.slice(8,10));
+
+      // 24-hour averages
+      // Calculate once per second
+      var jci =
+        julian_day_to_century(gregorian_date_to_julian_day(year, month, day));
+      var mubar_num = 0; var mubar_den = 0;
+      var mubar2_num = 0; var mubar2_den = 0;
+      var eps = 0.000001;
+      var cza;
+      var size = 24*60*60; var jc; var fractional_day;
+      for (var ii = 0; ii < size; ii++) {
+        jc = jci + ii / (24*60*60*36500);
+        cza = cos_solar_zenith_angle(jc, lat);
+        mubar_num += cza*cza;
+        mubar_den += cza;
+        if (cza >= eps) {
+          mubar2_num += cza;
+          mubar2_den += 1.0;
+        }
+      }
+      var mubar_day = mubar_num / mubar_den;
+      var mubar2_day = mubar2_num / mubar2_den;
+
+      // Annual averages
+      // Calculate once per minute
+      size = 365*24*60;
+      mubar_num = 0; mubar_den = 0;
+      mubar2_num = 0; mubar2_den = 0;
+      for (var ii = 0; ii < size; ii++) {
+        jc = jci + ii / (24*60*36500);
+        cza = cos_solar_zenith_angle(jc, lat);
+        mubar_num += cza*cza;
+        mubar_den += cza;
+        if (cza >= eps) {
+          mubar2_num += cza;
+          mubar2_den += 1.0;
+        }
+      }
+      var mubar_year = mubar_num / mubar_den;
+      var mubar2_year = mubar2_num / mubar2_den;
+
+      // Create arrays for plots
+      // Year
+      var ysize = 365;
+      var yearday = new Array(ysize);
+      var mu_noon = new Array(ysize);
+      for (var ii = 0; ii < ysize; ii++) {
+        mu_noon[ii] = cos_solar_zenith_angle_noon(jci + ii / 36500.0, lat);
+        yearday[ii] = ii;
+      }
+
+      // Day
+      var dsize = 1440;
+      var dayfrac = new Array(dsize);
+      var mu = new Array(dsize);
+      for (var ii = 0; ii < dsize; ii++) {
+        mu[ii] = cos_solar_zenith_angle(jci + ii / (1440.0*36500.0), lat);
+        dayfrac[ii] = ii/1440;
+      }
+
+      // Plot!
+      // Year
+      var ytrace1 = {
+        x: yearday,
+        y: mu_noon,
+        mode: 'lines',
+        line: {
+          color: 'black'
+        },
+        name: 'CSZA at solar noon'
+      };
+      var ytrace2 = {
+        x: [yearday[0], yearday[ysize-1]],
+        y: [mubar_year, mubar_year],
+        mode: 'lines',
+        line: {
+          color: 'rgb(0.3, 0.3, 0.7)'
+        },
+        name: 'Insolation weighted (' + (Math.floor(10000*mubar_year)/10000) + ')'
+      };
+      var ytrace3 = {
+        x: [yearday[0], yearday[ysize-1]],
+        y: [mubar2_year, mubar2_year],
+        mode: 'lines',
+        line: {
+          color: 'rgb(0.7, 0.3, 0.3)'
+        },
+        name: 'Daytime average (' + (Math.floor(10000*mubar2_year)/10000) + ')'
+      };
+      var ylayout = {
+        title: 'Annual averages',
+        xaxis: {
+          title: 'Days since 00LST on start date'
+        },
+        yaxis: {
+          title: 'CSZA'
+        },
+      };
+      var data = [ytrace1, ytrace2, ytrace3];
+      Plotly.newPlot('year_chart', data, ylayout);
+
+      // Day
+      var dtrace1 = {
+        x: dayfrac,
+        y: mu,
+        mode: 'lines',
+        line: {
+          color: 'black'
+        },
+        name: 'CSZA'
+      };
+      var dtrace2 = {
+        x: [dayfrac[0], dayfrac[dsize-1]],
+        y: [mubar_day, mubar_day],
+        mode: 'lines',
+        line: {
+          color: 'rgb(0.3, 0.3, 0.7)'
+        },
+        name: 'Insolation-weighted (' + (Math.floor(10000*mubar_day)/10000) + ')'
+      };
+      var dtrace3 = {
+        x: [dayfrac[0], dayfrac[dsize-1]],
+        y: [mubar2_day, mubar2_day],
+        mode: 'lines',
+        line: {
+          color: 'rgb(0.7, 0.3, 0.3)'
+        },
+        name: 'Daytime average (' + (Math.floor(10000*mubar2_day)/10000) + ')'
+      };
+      var dlayout = {
+        title: 'Diurnal averages',
+        xaxis: {
+          title: 'Days since 00LST on start date'
+        },
+        yaxis: {
+          title: 'CSZA'
+        },
+      };
+      var data = [dtrace1, dtrace2, dtrace3];
+      Plotly.newPlot('day_chart', data, dlayout);
+    }
+
+  </script>
+</body>
